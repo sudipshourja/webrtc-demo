@@ -2,7 +2,7 @@ let pc;
 let localStream;
 const config = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' } // STUN only
+    { urls: 'stun:stun.l.google.com:19302' }
   ]
 };
 
@@ -11,59 +11,99 @@ const remoteVideo = document.getElementById('remoteVideo');
 const localDesc = document.getElementById('localDesc');
 const remoteDesc = document.getElementById('remoteDesc');
 
+function log(...args) {
+  console.log('[DEBUG]', ...args);
+}
+
 document.getElementById('startBtn').onclick = async () => {
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-  localVideo.srcObject = localStream;
-  console.log('Camera started');
+  try {
+    log('Requesting local media...');
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    localVideo.srcObject = localStream;
+    log('Local media acquired:', localStream.getTracks().map(t => `${t.kind} (${t.readyState})`));
+  } catch (err) {
+    log('Error accessing camera/mic:', err);
+  }
 };
 
 document.getElementById('createOfferBtn').onclick = async () => {
-  pc = createPeerConnection();
+  if (!localStream) {
+    alert('Please start your camera first.');
+    return;
+  }
 
-  // Add local tracks
-  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  pc = createPeerConnection('Offerer');
+  localStream.getTracks().forEach(track => {
+    pc.addTrack(track, localStream);
+    log(`Added local ${track.kind} track to connection.`);
+  });
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
+  log('Local description set (offer):', offer.sdp.slice(0, 120) + '...');
   localDesc.value = JSON.stringify(pc.localDescription);
 };
 
 document.getElementById('createAnswerBtn').onclick = async () => {
-  pc = createPeerConnection();
+  if (!localStream) {
+    alert('Please start your camera first.');
+    return;
+  }
 
-  // Add local tracks
-  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  pc = createPeerConnection('Answerer');
+  localStream.getTracks().forEach(track => {
+    pc.addTrack(track, localStream);
+    log(`Added local ${track.kind} track to connection.`);
+  });
 
   const offer = JSON.parse(remoteDesc.value);
   await pc.setRemoteDescription(offer);
+  log('Remote description set (offer).');
 
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
+  log('Local description set (answer):', answer.sdp.slice(0, 120) + '...');
   localDesc.value = JSON.stringify(pc.localDescription);
 };
 
 document.getElementById('setAnswerBtn').onclick = async () => {
   const answer = JSON.parse(remoteDesc.value);
   await pc.setRemoteDescription(answer);
-  console.log('Remote answer set!');
+  log('Remote answer applied.');
 };
 
-function createPeerConnection() {
+function createPeerConnection(role) {
   const pc = new RTCPeerConnection(config);
+  log(`RTCPeerConnection created as ${role}`);
 
   pc.onicecandidate = e => {
     if (e.candidate) {
-      console.log('New ICE candidate:', e.candidate);
+      log('ICE candidate:', e.candidate.candidate);
+    } else {
+      log('All ICE candidates sent.');
     }
   };
 
-  pc.ontrack = e => {
-    console.log('Remote stream received');
-    remoteVideo.srcObject = e.streams[0];
+  pc.oniceconnectionstatechange = () => {
+    log('ICE connection state:', pc.iceConnectionState);
   };
 
   pc.onconnectionstatechange = () => {
-    console.log('Connection state:', pc.connectionState);
+    log('Peer connection state:', pc.connectionState);
+  };
+
+  pc.ontrack = e => {
+    log('Remote stream received:', e.streams[0]);
+    remoteVideo.srcObject = e.streams[0];
+    remoteVideo.play().catch(err => log('Autoplay error:', err));
+  };
+
+  pc.onnegotiationneeded = () => {
+    log('Negotiation needed event triggered.');
+  };
+
+  pc.onicegatheringstatechange = () => {
+    log('ICE gathering state:', pc.iceGatheringState);
   };
 
   return pc;
