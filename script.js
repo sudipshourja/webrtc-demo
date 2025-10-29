@@ -59,7 +59,7 @@ function createPeerConnection() {
 
   pc.ontrack = e => {
     console.log('Remote stream received');
-    remoteVideo.srcObject = e.streams[0];
+    remoteVideo.srcObject = e.streams[1];
   };
 
   pc.onconnectionstatechange = () => {
