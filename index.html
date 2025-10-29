@@ -2,33 +2,78 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WebRTC STUN Only Debug</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebRTC STUN-only • Debug</title>
   <style>
-  video {
-    width: 45%;
-    border: 1px solid #333;
-  }
-</style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
+    h2 { margin: 8px 0 12px; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+    video { width: min(48vw, 480px); max-height: 40vh; background: #000; border-radius: 8px; }
+    textarea { width: min(98vw, 920px); height: 140px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    button { padding: 8px 12px; border-radius: 8px; border: 1px solid #8885; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .logs { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #0001; padding: 8px; border-radius: 8px; height: 220px; overflow:auto; width: min(98vw, 920px); }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#8882; margin-left:6px; font-size:12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 8px; }
+    .card { padding: 8px; border: 1px solid #8885; border-radius: 8px; }
+    .small { font-size: 12px; opacity: 0.8; }
+  </style>
 </head>
 <body>
-  <h2>WebRTC STUN-only (Debug Mode)</h2>
+  <h2>WebRTC STUN-only (Debug)</h2>
 
-  <video id="localVideo" autoplay playsinline muted></video>
-  <video id="remoteVideo" autoplay playsinline></video>
-
-  <div>
-    <button id="startBtn">Start Camera</button>
-    <button id="createOfferBtn">Create Offer</button>
-    <button id="createAnswerBtn">Create Answer</button>
-    <button id="setAnswerBtn">Set Remote Answer</button>
+  <div class="row">
+    <video id="localVideo" autoplay playsinline muted></video>
+    <video id="remoteVideo" autoplay playsinline></video>
   </div>
 
-  <h3>Local Description (copy this):</h3>
-  <textarea id="localDesc" cols="80" rows="8" readonly></textarea>
+  <div class="grid" style="margin-top:12px;">
+    <div class="card">
+      <div><strong>Controls</strong></div>
+      <div style="margin-top:6px;">
+        <button id="startBtn">1) Start Camera</button>
+        <button id="createOfferBtn" disabled>2) Create Offer</button>
+        <button id="createAnswerBtn" disabled>3) Create Answer</button>
+        <button id="setAnswerBtn" disabled>4) Set Remote Answer</button>
+        <button id="hangupBtn" disabled>Hang Up</button>
+      </div>
+      <div class="small" style="margin-top:6px;">
+        Offerer flow: Start Camera → Create Offer → Send to Peer → Paste Answer → Set Remote Answer<br/>
+        Answerer flow: Start Camera → Paste Offer → Create Answer → Send back
+      </div>
+    </div>
 
-  <h3>Remote Description (paste here):</h3>
-  <textarea id="remoteDesc" cols="80" rows="8"></textarea>
+    <div class="card">
+      <div><strong>States</strong></div>
+      <div class="small" style="margin-top:6px;">
+        ICE: <span id="iceState" class="pill">-</span><br/>
+        PC: <span id="pcState" class="pill">-</span><br/>
+        ICE Gathering: <span id="gatherState" class="pill">-</span><br/>
+        Direction (video): <span id="dirVideo" class="pill">-</span><br/>
+        Direction (audio): <span id="dirAudio" class="pill">-</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div><strong>Live Stats (every 2s)</strong></div>
+      <div class="small" style="margin-top:6px;">
+        Outbound video bytes: <span id="outVidBytes">0</span><br/>
+        Inbound video bytes: <span id="inVidBytes">0</span><br/>
+        Outbound audio bytes: <span id="outAudBytes">0</span><br/>
+        Inbound audio bytes: <span id="inAudBytes">0</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>Local Description (copy & send to peer)</h3>
+  <textarea id="localDesc" readonly></textarea>
+
+  <h3>Remote Description (paste from peer)</h3>
+  <textarea id="remoteDesc" placeholder='Paste the JSON SDP object here'></textarea>
+
+  <h3>Debug Logs</h3>
+  <div id="logs" class="logs"></div>
 
   <script src="script.js"></script>
 </body>
