@@ -12,7 +12,7 @@ const localDesc = document.getElementById('localDesc');
 const remoteDesc = document.getElementById('remoteDesc');
 
 document.getElementById('startBtn').onclick = async () => {
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
   localVideo.srcObject = localStream;
   console.log('Camera started');
 };
@@ -59,7 +59,7 @@ function createPeerConnection() {
 
   pc.ontrack = e => {
     console.log('Remote stream received');
-    remoteVideo.srcObject = e.streams[1];
+    remoteVideo.srcObject = e.streams[0];
   };
 
   pc.onconnectionstatechange = () => {
