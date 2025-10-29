@@ -95,7 +95,12 @@ function createPeerConnection(role) {
   pc.ontrack = e => {
     log('Remote stream received:', e.streams[0]);
     remoteVideo.srcObject = e.streams[0];
-    remoteVideo.play().catch(err => log('Autoplay error:', err));
+    remoteVideo.addEventListener('loadedmetadata', () => {
+    log('Remote video metadata loaded, trying to play...');
+    remoteVideo.play()
+        .then(() => log('Remote video playback started.'))
+        .catch(err => log('Remote video play() failed:', err));
+    });
   };
 
   pc.onnegotiationneeded = () => {
