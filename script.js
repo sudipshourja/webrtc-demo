@@ -1,268 +1,215 @@
-// ---- Config ----
 const ICE_CONFIG = {
   iceServers: [
-    // STUN only (no TURN)
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ]
-};
-
-// ---- DOM ----
-const els = {
-  localVideo: document.getElementById('localVideo'),
-  remoteVideo: document.getElementById('remoteVideo'),
-  startBtn: document.getElementById('startBtn'),
-  createOfferBtn: document.getElementById('createOfferBtn'),
-  createAnswerBtn: document.getElementById('createAnswerBtn'),
-  setAnswerBtn: document.getElementById('setAnswerBtn'),
-  hangupBtn: document.getElementById('hangupBtn'),
-  localDesc: document.getElementById('localDesc'),
-  remoteDesc: document.getElementById('remoteDesc'),
-  logs: document.getElementById('logs'),
-  iceState: document.getElementById('iceState'),
-  pcState: document.getElementById('pcState'),
-  gatherState: document.getElementById('gatherState'),
-  dirVideo: document.getElementById('dirVideo'),
-  dirAudio: document.getElementById('dirAudio'),
-  outVidBytes: document.getElementById('outVidBytes'),
-  inVidBytes: document.getElementById('inVidBytes'),
-  outAudBytes: document.getElementById('outAudBytes'),
-  inAudBytes: document.getElementById('inAudBytes'),
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ],
 };
 
 let pc = null;
 let localStream = null;
+let remoteStream = null;
 let statsTimer = null;
-let role = null; // 'Offerer' | 'Answerer'
+let currentPCToken = 0;
 
-// ---- Logging ----
+// DOM references
+const el = (id) => document.getElementById(id);
+const logBox = el("logs");
+const localVideo = el("localVideo");
+const remoteVideo = el("remoteVideo");
+
+// ---- Logging Helper ----
 function log(...args) {
-  const line = `[${new Date().toLocaleTimeString()}] ${args.map(String).join(' ')}`;
-  console.log('[DEBUG]', ...args);
-  els.logs.textContent += line + '\n';
-  els.logs.scrollTop = els.logs.scrollHeight;
+  const msg = `[${new Date().toLocaleTimeString()}] ${args.join(" ")}`;
+  console.log("[DEBUG]", ...args);
+  logBox.textContent += msg + "\n";
+  logBox.scrollTop = logBox.scrollHeight;
 }
 
-// ---- Helpers ----
-function safeJSONParse(s) {
-  try { return JSON.parse(s); } catch { return null; }
+// ---- UI Helper ----
+function updateStatUI(stats) {
+  el("outVidBytes").textContent = stats.outVid.toString();
+  el("inVidBytes").textContent = stats.inVid.toString();
+  el("outAudBytes").textContent = stats.outAud.toString();
+  el("inAudBytes").textContent = stats.inAud.toString();
 }
 
-function setButtonsState({ started, havePC, isOfferer, remoteSet }) {
-  els.createOfferBtn.disabled = !started || !havePC && false;
-  els.createAnswerBtn.disabled = !started;
-  els.setAnswerBtn.disabled = !remoteSet;
-  els.hangupBtn.disabled = !havePC;
+function updateStateUI(pc) {
+  el("iceState").textContent = pc.iceConnectionState;
+  el("pcState").textContent = pc.connectionState;
+  el("gatherState").textContent = pc.iceGatheringState;
 }
 
-function resetStatesUI() {
-  els.iceState.textContent = '-';
-  els.pcState.textContent = '-';
-  els.gatherState.textContent = '-';
-  els.dirVideo.textContent = '-';
-  els.dirAudio.textContent = '-';
-  els.outVidBytes.textContent = '0';
-  els.inVidBytes.textContent = '0';
-  els.outAudBytes.textContent = '0';
-  els.inAudBytes.textContent = '0';
-}
-
-function parseDirectionsFromSDP(sdp) {
-  // Return most specific direction found per media section
-  const lines = sdp.split('\n').map(l => l.trim());
-  let current = null;
+function parseDirections(sdp) {
   const out = {};
-  for (const l of lines) {
-    if (l.startsWith('m=')) {
-      if (/m=video/.test(l)) current = 'video';
-      else if (/m=audio/.test(l)) current = 'audio';
+  let current = null;
+  sdp.split("\n").forEach((l) => {
+    if (l.startsWith("m=")) {
+      if (l.includes("video")) current = "video";
+      else if (l.includes("audio")) current = "audio";
       else current = null;
     }
-    if (l.startsWith('a=sendrecv') || l.startsWith('a=sendonly') || l.startsWith('a=recvonly') || l.startsWith('a=inactive')) {
-      if (current) out[current] = l.replace('a=', '');
+    if (l.startsWith("a=sendrecv") || l.startsWith("a=sendonly") || l.startsWith("a=recvonly") || l.startsWith("a=inactive")) {
+      if (current) out[current] = l.replace("a=", "");
     }
-  }
-  return out; // e.g., { video: 'sendrecv', audio: 'sendrecv' }
+  });
+  return out;
 }
 
-function updateDirectionsUI(desc) {
+function updateDirectionUI(desc) {
   if (!desc?.sdp) return;
-  const d = parseDirectionsFromSDP(desc.sdp);
-  els.dirVideo.textContent = d.video || '(none)';
-  els.dirAudio.textContent = d.audio || '(none)';
+  const d = parseDirections(desc.sdp);
+  el("dirVideo").textContent = d.video || "-";
+  el("dirAudio").textContent = d.audio || "-";
 }
 
-// ---- PC Creation ----
-function createPC(createdBy) {
-  if (pc) {
-    try { pc.close(); } catch {}
-    pc = null;
-  }
+// ---- Core WebRTC ----
+function createPeerConnection(role) {
+  currentPCToken++;
+  const token = currentPCToken;
+  if (pc) try { pc.close(); } catch {}
   pc = new RTCPeerConnection(ICE_CONFIG);
-  role = createdBy;
+  remoteStream = new MediaStream();
+  remoteVideo.srcObject = remoteStream;
 
-  log(`RTCPeerConnection created (${createdBy}).`);
+  log(`RTCPeerConnection created (${role}).`);
 
-  pc.onicecandidate = e => {
-    if (e.candidate) log('ICE candidate:', e.candidate.candidate);
-    else log('All ICE candidates sent.');
+  // Force both directions
+  pc.addTransceiver("audio", { direction: "sendrecv" });
+  pc.addTransceiver("video", { direction: "sendrecv" });
+
+  // ICE events
+  pc.onicecandidate = (e) => {
+    if (e.candidate) log("ICE candidate:", e.candidate.candidate);
+    else log("All ICE candidates sent.");
   };
   pc.oniceconnectionstatechange = () => {
-    els.iceState.textContent = pc.iceConnectionState;
-    log('ICE connection state:', pc.iceConnectionState);
+    if (token !== currentPCToken) return;
+    log("ICE connection state:", pc.iceConnectionState);
+    updateStateUI(pc);
   };
   pc.onconnectionstatechange = () => {
-    els.pcState.textContent = pc.connectionState;
-    log('Peer connection state:', pc.connectionState);
+    if (token !== currentPCToken) return;
+    log("Peer connection state:", pc.connectionState);
+    updateStateUI(pc);
   };
   pc.onicegatheringstatechange = () => {
-    els.gatherState.textContent = pc.iceGatheringState;
-    log('ICE gathering state:', pc.iceGatheringState);
+    if (token !== currentPCToken) return;
+    log("ICE gathering state:", pc.iceGatheringState);
+    updateStateUI(pc);
   };
-  pc.onnegotiationneeded = () => log('Negotiation needed.');
+  pc.onnegotiationneeded = () => log("Negotiation needed.");
 
-  pc.ontrack = e => {
-    log('ontrack fired. streams:', e.streams.length, 'track kind:', e.track?.kind);
-    if (!els.remoteVideo.srcObject) {
-      els.remoteVideo.srcObject = e.streams[0];
-      els.remoteVideo.addEventListener('loadedmetadata', () => {
-        log('Remote loadedmetadata. VideoWidth:', els.remoteVideo.videoWidth, 'VideoHeight:', els.remoteVideo.videoHeight);
-        els.remoteVideo.play().then(() => log('Remote video playing')).catch(err => log('remoteVideo.play() failed:', err));
-      }, { once: true });
-    }
+  // Remote track
+  pc.ontrack = (e) => {
+    log("ontrack:", e.track.kind, "state:", e.track.readyState);
+    remoteStream.addTrack(e.track);
+    if (remoteVideo.readyState >= 2)
+      remoteVideo.play().catch((err) => log("play() failed:", err));
+    else
+      remoteVideo.onloadedmetadata = () =>
+        remoteVideo.play().catch((err) => log("play() failed:", err));
   };
 
-  // Optional: log receivers when available
-  setTimeout(() => {
-    try {
-      pc.getReceivers().forEach(r => {
-        if (r.track) log('Receiver:', r.track.kind, 'state:', r.track.readyState);
-      });
-    } catch {}
-  }, 500);
-
-  // Stats loop
+  // Start stats loop
   if (statsTimer) clearInterval(statsTimer);
   statsTimer = setInterval(async () => {
     if (!pc) return;
     try {
-      const stats = await pc.getStats();
-      let inVid = 0, outVid = 0, inAud = 0, outAud = 0;
-      stats.forEach(report => {
-        if (report.type === 'inbound-rtp') {
-          if (report.kind === 'video') inVid += report.bytesReceived || 0;
-          if (report.kind === 'audio') inAud += report.bytesReceived || 0;
-        } else if (report.type === 'outbound-rtp') {
-          if (report.kind === 'video') outVid += report.bytesSent || 0;
-          if (report.kind === 'audio') outAud += report.bytesSent || 0;
+      const s = await pc.getStats();
+      let inVid = 0,
+        outVid = 0,
+        inAud = 0,
+        outAud = 0;
+      s.forEach((r) => {
+        if (r.type === "inbound-rtp") {
+          if (r.kind === "video") inVid += r.bytesReceived || 0;
+          if (r.kind === "audio") inAud += r.bytesReceived || 0;
+        } else if (r.type === "outbound-rtp") {
+          if (r.kind === "video") outVid += r.bytesSent || 0;
+          if (r.kind === "audio") outAud += r.bytesSent || 0;
         }
       });
-      els.outVidBytes.textContent = outVid.toString();
-      els.inVidBytes.textContent = inVid.toString();
-      els.outAudBytes.textContent = outAud.toString();
-      els.inAudBytes.textContent = inAud.toString();
-    } catch (e) {
-      // Ignored
-    }
+      updateStatUI({ inVid, outVid, inAud, outAud });
+    } catch {}
   }, 2000);
 
   return pc;
 }
 
-// ---- Events ----
-els.startBtn.onclick = async () => {
+// ---- Buttons ----
+el("startBtn").onclick = async () => {
   try {
-    log('Requesting local media…');
-    // Keep it broad & simple
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    els.localVideo.srcObject = localStream;
-    const tracks = localStream.getTracks().map(t => `${t.kind} (${t.readyState})`);
-    log('Local media acquired:', JSON.stringify(tracks));
-
-    // Prepare PC for both roles, but only add tracks when creating offer/answer
-    resetStatesUI();
-    els.createOfferBtn.disabled = false;
-    els.createAnswerBtn.disabled = false;
-    els.hangupBtn.disabled = true;
+    log("Requesting local media…");
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    });
+    localVideo.srcObject = localStream;
+    log(
+      "Local media acquired:",
+      JSON.stringify(localStream.getTracks().map((t) => `${t.kind} (${t.readyState})`))
+    );
+    el("createOfferBtn").disabled = false;
+    el("createAnswerBtn").disabled = false;
   } catch (err) {
-    log('getUserMedia error:', err.name, err.message);
-    alert(`Could not access camera/mic: ${err.name}`);
+    log("getUserMedia error:", err.name, err.message);
+    alert("Camera/mic error: " + err.name);
   }
 };
 
-els.createOfferBtn.onclick = async () => {
-  if (!localStream) return alert('Start camera first');
-  const pc = createPC('Offerer');
+el("createOfferBtn").onclick = async () => {
+  if (!localStream) return alert("Start camera first");
+  const pc = createPeerConnection("Offerer");
+  localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
 
-  // Add local tracks BEFORE creating offer
-  localStream.getTracks().forEach(t => {
-    pc.addTrack(t, localStream);
-    log(`Added local ${t.kind} track`);
-  });
-
-  const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+  const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  updateDirectionsUI(pc.localDescription);
-  log('Local description set (offer). First 160 chars:\n' + pc.localDescription.sdp.slice(0, 160) + '…');
-
-  els.localDesc.value = JSON.stringify(pc.localDescription);
-  els.hangupBtn.disabled = false;
+  updateDirectionUI(pc.localDescription);
+  el("localDesc").value = JSON.stringify(pc.localDescription);
+  log("Local description (offer) ready.");
 };
 
-els.createAnswerBtn.onclick = async () => {
-  const remote = safeJSONParse(els.remoteDesc.value);
-  if (!remote) return alert('Paste a valid remote offer JSON first');
-  if (!localStream) return alert('Start camera first');
+el("createAnswerBtn").onclick = async () => {
+  const remote = JSON.parse(el("remoteDesc").value || "{}");
+  if (!remote?.sdp) return alert("Paste a valid offer first");
+  if (!localStream) return alert("Start camera first");
 
-  const pc = createPC('Answerer');
-
-  // Add local tracks BEFORE creating answer
-  localStream.getTracks().forEach(t => {
-    pc.addTrack(t, localStream);
-    log(`Added local ${t.kind} track`);
-  });
+  const pc = createPeerConnection("Answerer");
+  localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
 
   await pc.setRemoteDescription(remote);
-  log('Remote description set (offer).');
-  updateDirectionsUI(remote);
+  log("Remote offer applied.");
+  updateDirectionUI(remote);
 
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
-  updateDirectionsUI(pc.localDescription);
-  log('Local description set (answer). First 160 chars:\n' + pc.localDescription.sdp.slice(0, 160) + '…');
-
-  els.localDesc.value = JSON.stringify(pc.localDescription);
-  els.hangupBtn.disabled = false;
+  updateDirectionUI(pc.localDescription);
+  el("localDesc").value = JSON.stringify(pc.localDescription);
+  log("Local description (answer) ready.");
 };
 
-els.setAnswerBtn.onclick = async () => {
-  const ans = safeJSONParse(els.remoteDesc.value);
-  if (!ans) return alert('Paste a valid remote answer JSON first');
-  if (!pc) return alert('Create an offer first');
+el("setAnswerBtn").onclick = async () => {
+  const ans = JSON.parse(el("remoteDesc").value || "{}");
+  if (!ans?.sdp) return alert("Paste a valid answer first");
   await pc.setRemoteDescription(ans);
-  log('Remote answer applied.');
-  updateDirectionsUI(ans);
+  log("Remote answer applied.");
+  updateDirectionUI(ans);
 };
 
-els.remoteDesc.addEventListener('input', () => {
-  els.setAnswerBtn.disabled = !els.remoteDesc.value.trim();
-});
-
-els.hangupBtn.onclick = () => {
+el("hangupBtn").onclick = () => {
   if (pc) {
     try { pc.close(); } catch {}
     pc = null;
   }
-  if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
-  els.localDesc.value = '';
-  // keep remoteDesc so you can retry setting answer if needed
-  resetStatesUI();
-  log('Call ended / PC closed.');
-  els.hangupBtn.disabled = true;
+  if (statsTimer) clearInterval(statsTimer);
+  log("Connection closed.");
 };
 
-// Make sure remote video tries to play when it has data
-els.remoteVideo.addEventListener('loadedmetadata', () => {
-  log('Remote <video> loadedmetadata fired.');
-  els.remoteVideo.play().then(() => log('Remote playback OK')).catch(err => log('Remote playback blocked:', err));
+// ---- Remote video playback logs ----
+remoteVideo.addEventListener("loadedmetadata", () => {
+  log("Remote loadedmetadata fired.");
+  remoteVideo
+    .play()
+    .then(() => log("Remote playback started."))
+    .catch((e) => log("Remote playback error:", e));
 });
