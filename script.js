@@ -18,7 +18,7 @@ function log(...args) {
 document.getElementById('startBtn').onclick = async () => {
   try {
     log('Requesting local media...');
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     localVideo.srcObject = localStream;
     log('Local media acquired:', localStream.getTracks().map(t => `${t.kind} (${t.readyState})`));
   } catch (err) {
