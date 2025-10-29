@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebRTC STUN Only Demo</title>
+</head>
+<body>
+  <h2>WebRTC STUN-only (no TURN)</h2>
+
+  <video id="localVideo" autoplay playsinline muted></video>
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <div>
+    <button id="startBtn">Start Camera</button>
+    <button id="createOfferBtn">Create Offer</button>
+    <button id="createAnswerBtn">Create Answer</button>
+    <button id="setAnswerBtn">Set Remote Answer</button>
+  </div>
+
+  <h3>Local Description (copy this):</h3>
+  <textarea id="localDesc" cols="80" rows="8" readonly></textarea>
+
+  <h3>Remote Description (paste here):</h3>
+  <textarea id="remoteDesc" cols="80" rows="8"></textarea>
+
+  <script src="script.js"></script>
+</body>
+</html>
